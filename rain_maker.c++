@@ -1,318 +1,147 @@
 #include "RMaker.h"
 #include "WiFi.h"
 #include "WiFiProv.h"
-#include <EEPROM.h>
-//---------------------------------------------------
-//install these libraries
-//#include <ezButton.h>
-//#include <IRremote.h>
-//---------------------------------------------------
-const char *service_name = "BPK-ALUNOS";
-const char *pop = "2020alunos";
-//---------------------------------------------------
-#define EEPROM_SIZE 4
-//const byte IR_RECEIVE_PIN = 14;
-//---------------------------------------------------
-// define the Device Names
-char device1[] = "Switch1";
-char device2[] = "Switch2";
-char device3[] = "Switch3";
-char device4[] = "Switch4";
-//---------------------------------------------------
-// define the GPIO connected with Relays and switches
-static uint8_t RELAY_1 = 23;  //D23
-static uint8_t RELAY_2 = 22;  //D22
-static uint8_t RELAY_3 = 21;  //D21
-static uint8_t RELAY_4 = 19;  //D19
-//---------------------------------------------------
-//ezButton button1(34);
-//ezButton button2(35);
-//ezButton button3(32);
-//ezButton button4(33);
-//---------------------------------------------------
-//static uint8_t SwitchPin1 = 13;  //D13
-//static uint8_t SwitchPin2 = 12;  //D12
-//static uint8_t SwitchPin3 = 14;  //D14
-//static uint8_t SwitchPin4 = 27;  //D27
-//---------------------------------------------------
-static uint8_t WIFI_LED    = 2;   //D2
-static uint8_t gpio_reset = 0;
-//---------------------------------------------------
-/* Variable for reading pin status*/
-// Relay State
-bool STATE_RELAY_1 = LOW; //Define integer to remember the toggle state for relay 1
-bool STATE_RELAY_2 = LOW; //Define integer to remember the toggle state for relay 2
-bool STATE_RELAY_3 = LOW; //Define integer to remember the toggle state for relay 3
-bool STATE_RELAY_4 = LOW; //Define integer to remember the toggle state for relay 4
-//---------------------------------------------------
-// Switch State
-//bool SwitchState_1 = LOW;
-//bool SwitchState_2 = LOW;
-//bool SwitchState_3 = LOW;
-//bool SwitchState_4 = LOW;
-//---------------------------------------------------
-//The framework provides some standard device types 
-//like switch, lightbulb, fan, temperature sensor.
-static Switch my_switch1(device1, &RELAY_1);
-static Switch my_switch2(device2, &RELAY_2);
-static Switch my_switch3(device3, &RELAY_3);
-static Switch my_switch4(device4, &RELAY_4);
-//---------------------------------------------------
+#include "DHT.h"
 
-/**********************************
- * sysProvEvent Function
-***********************************/
-void sysProvEvent(arduino_event_t *sys_event)
-{
-    switch (sys_event->event_id) {      
-        case ARDUINO_EVENT_PROV_START:
-#if CONFIG_IDF_TARGET_ESP32
-        Serial.printf("\nProvisioning Started with name \"%s\" and PoP \"%s\" on BLE\n", service_name, pop);
-        printQR(service_name, pop, "ble");
-#else
-        Serial.printf("\nProvisioning Started with name \"%s\" and PoP \"%s\" on SoftAP\n", service_name, pop);
-        printQR(service_name, pop, "softap");
-#endif        
-        break;
-        case ARDUINO_EVENT_WIFI_STA_CONNECTED:
-        Serial.printf("\nConnected to Wi-Fi!\n");
+// Configuração do serviço de provisionamento
+const char *SERVICE_NAME = "BPK-ALUNOS";
+const char *POP = "2020alunos";
+
+// Pinos dos relés
+#define RELAY_1 23  // D23
+#define RELAY_2 22  // D22
+#define RELAY_3 21  // D21
+#define RELAY_4 19  // D19
+
+// LED Wi-Fi
+#define WIFI_LED 2  // D2
+
+// Pinos dos sensores
+#define LDR_PIN 33             // D33
+#define GAS_DIGITAL_PIN 32     // D32
+#define GAS_ANALOG_PIN 35      // D35
+#define DHT_PIN 34             // D34
+#define DHT_TYPE DHT11         // Tipo do sensor DHT11
+
+// Estados dos relés
+bool stateRelay1 = false;
+bool stateRelay2 = false;
+bool stateRelay3 = false;
+bool stateRelay4 = false;
+
+// Instância do sensor DHT
+DHT dht(DHT_PIN, DHT_TYPE);
+
+// Função para controle de relés
+void controlRelay(int relayPin, bool &state, const char *name) {
+    state = !state;
+    digitalWrite(relayPin, state ? HIGH : LOW);
+    Serial.printf("%s está %s\n", name, state ? "LIGADO" : "DESLIGADO");
+}
+
+// Callback para gerenciar mudanças nos dispositivos
+void writeCallback(Device *device, Param *param, const param_val_t val, void *priv_data, write_ctx_t *ctx) {
+    const char *deviceName = device->getDeviceName();
+    if (strcmp(deviceName, "Relay1") == 0) {
+        controlRelay(RELAY_1, stateRelay1, "Relay1");
+    } else if (strcmp(deviceName, "Relay2") == 0) {
+        controlRelay(RELAY_2, stateRelay2, "Relay2");
+    } else if (strcmp(deviceName, "Relay3") == 0) {
+        controlRelay(RELAY_3, stateRelay3, "Relay3");
+    } else if (strcmp(deviceName, "Relay4") == 0) {
+        controlRelay(RELAY_4, stateRelay4, "Relay4");
+    }
+}
+
+// Evento de provisionamento
+void sysProvEvent(arduino_event_t *sys_event) {
+    if (sys_event->event_id == ARDUINO_EVENT_PROV_START) {
+        Serial.printf("\nProvisionando com nome \"%s\" e PoP \"%s\"...\n", SERVICE_NAME, POP);
+    } else if (sys_event->event_id == ARDUINO_EVENT_WIFI_STA_CONNECTED) {
+        Serial.println("\nConectado ao Wi-Fi!");
         digitalWrite(WIFI_LED, HIGH);
-        break;
     }
 }
 
-/**********************************
- * write_callback Function
-***********************************/
-void write_callback(Device *device, Param *param, const param_val_t val, void *priv_data, write_ctx_t *ctx)
-{
-    const char *device_name = device->getDeviceName();
-    const char *param_name = param->getParamName();
-    //----------------------------------------------------------------------------------
-    if(strcmp(device_name, device1) == 0) {
-      
-      Serial.printf("Lightbulb1 = %s\n", val.val.b? "true" : "false");
-      
-      if(strcmp(param_name, "Power") == 0) {
-        //Serial.printf("Received value = %s for %s - %s\n", val.val.b? "true" : "false", device_name, param_name);
-        STATE_RELAY_1 = val.val.b;
-        STATE_RELAY_1 = !STATE_RELAY_1;
-        control_relay(1, RELAY_1, STATE_RELAY_1);
-        //(STATE_RELAY_1 == false) ? digitalWrite(RELAY_1, HIGH) : digitalWrite(RELAY_1, LOW);
-        //param->updateAndReport(val);
-      }
-    }
-   
-    //----------------------------------------------------------------------------------
-    else if(strcmp(device_name, device2) == 0) {
-      
-      Serial.printf("Switch value = %s\n", val.val.b? "true" : "false");
+void setup() {
+    // Iniciar serial
+    Serial.begin(115200);
 
-      if(strcmp(param_name, "Power") == 0) {
-        //Serial.printf("Received value = %s for %s - %s\n", val.val.b? "true" : "false", device_name, param_name);
-        STATE_RELAY_2 = val.val.b;
-        STATE_RELAY_2 = !STATE_RELAY_2;
-        control_relay(2, RELAY_2, STATE_RELAY_2);
-        //(STATE_RELAY_2 == false) ? digitalWrite(RELAY_2, HIGH) : digitalWrite(RELAY_2, LOW);
-        //param->updateAndReport(val);
-      }
-    }
-    //----------------------------------------------------------------------------------
-    else if(strcmp(device_name, device3) == 0) {
-      
-      Serial.printf("Switch value = %s\n", val.val.b? "true" : "false");
+    // Configurar pinos como saída
+    pinMode(RELAY_1, OUTPUT);
+    pinMode(RELAY_2, OUTPUT);
+    pinMode(RELAY_3, OUTPUT);
+    pinMode(RELAY_4, OUTPUT);
+    pinMode(WIFI_LED, OUTPUT);
 
-      if(strcmp(param_name, "Power") == 0) {
-        //Serial.printf("Received value = %s for %s - %s\n", val.val.b? "true" : "false", device_name, param_name);
-        STATE_RELAY_3 = val.val.b;
-        STATE_RELAY_3 = !STATE_RELAY_3;
-        control_relay(3, RELAY_3, STATE_RELAY_3);        
-        //(STATE_RELAY_3 == false) ? digitalWrite(RELAY_3, HIGH) : digitalWrite(RELAY_3, LOW);
-        //param->updateAndReport(val);
-      }
-  
-    }
-    //----------------------------------------------------------------------------------
-    else if(strcmp(device_name, device4) == 0) {
-      
-      Serial.printf("Switch value = %s\n", val.val.b? "true" : "false");
+    // Configurar pinos dos sensores
+    pinMode(GAS_DIGITAL_PIN, INPUT);
 
-      if(strcmp(param_name, "Power") == 0) {
-        //Serial.printf("Received value = %s for %s - %s\n", val.val.b? "true" : "false", device_name, param_name);
-        STATE_RELAY_4 = val.val.b;
-        STATE_RELAY_4 = !STATE_RELAY_4;
-        control_relay(4, RELAY_4, STATE_RELAY_4);
-        //(STATE_RELAY_4 == false) ? digitalWrite(RELAY_4, HIGH) : digitalWrite(RELAY_4, LOW);
-        //param->updateAndReport(val);
-      } 
-    }
-    //---------------------------------------------------------------------------------- 
-     
-}
-
- 
-/**********************************
- * setup Function
-***********************************/
-void setup(){
-  //------------------------------------------------------------------------------
-  uint32_t chipId = 0;
-  Serial.begin(115200);
-  //------------------------------------------------------------------------------
-  // initialize EEPROM with predefined size
-  EEPROM.begin(EEPROM_SIZE);
-  //------------------------------------------------------------------------------
-  //IrReceiver.begin(IR_RECEIVE_PIN); // Start the IR receiver
-  //------------------------------------------------------------------------------
-  // Set the Relays GPIOs as output mode
-  pinMode(RELAY_1, OUTPUT);
-  pinMode(RELAY_2, OUTPUT);
-  pinMode(RELAY_3, OUTPUT);
-  pinMode(RELAY_4, OUTPUT);
-  //------------------------------------------------------------------------------
-  // set debounce time to 100 milliseconds
-  //button1.setDebounceTime(100);
-  //button2.setDebounceTime(100);
-  //button3.setDebounceTime(100);
-  //button4.setDebounceTime(100);
-  //------------------------------------------------------------------------------
-  pinMode(gpio_reset, INPUT);
-  pinMode(WIFI_LED, OUTPUT);
-  digitalWrite(WIFI_LED, LOW);
-  //------------------------------------------------------------------------------
-  // Write to the GPIOs the default state on booting
-  digitalWrite(RELAY_1, !STATE_RELAY_1);
-  digitalWrite(RELAY_2, !STATE_RELAY_2);
-  digitalWrite(RELAY_3, !STATE_RELAY_3);
-  digitalWrite(RELAY_4, !STATE_RELAY_4);
-  //------------------------------------------------------------------------------
-  Node my_node;    
-  my_node = RMaker.initNode("Tech Trends Shameer");
-  //------------------------------------------------------------------------------
-  //Standard switch device
-  my_switch1.addCb(write_callback);
-  my_switch2.addCb(write_callback);
-  my_switch3.addCb(write_callback);
-  my_switch4.addCb(write_callback);
-  //------------------------------------------------------------------------------
-  //Add switch device to the node   
-  my_node.addDevice(my_switch1);
-  my_node.addDevice(my_switch2);
-  my_node.addDevice(my_switch3);
-  my_node.addDevice(my_switch4);
-  //------------------------------------------------------------------------------
-  //This is optional 
-  RMaker.enableOTA(OTA_USING_PARAMS);
-  //If you want to enable scheduling, set time zone for your region using setTimeZone(). 
-  //The list of available values are provided here https://rainmaker.espressif.com/docs/time-service.html
-  // RMaker.setTimeZone("Asia/Shanghai");
-  // Alternatively, enable the Timezone service and let the phone apps set the appropriate timezone
-  RMaker.enableTZService();
-  RMaker.enableSchedule();
-  //------------------------------------------------------------------------------
-  //Service Name
-  for(int i=0; i<17; i=i+8) {
-    chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
-  }
-
-  Serial.printf("\nChip ID:  %d Service Name: %s\n", chipId, service_name);
-  //------------------------------------------------------------------------------
-  Serial.printf("\nStarting ESP-RainMaker\n");
-  RMaker.start();
-  //------------------------------------------------------------------------------
-  WiFi.onEvent(sysProvEvent);
-  #if CONFIG_IDF_TARGET_ESP32
-    WiFiProv.beginProvision(NETWORK_PROV_SCHEME_BLE, NETWORK_PROV_SCHEME_HANDLER_FREE_BTDM, NETWORK_PROV_SECURITY_1, pop, service_name);
-  #else
-    WiFiProv.beginProvision(NETWORK_PROV_SCHEME_SOFTAP, NETWORK_PROV_SCHEME_HANDLER_NONE, NETWORK_PROV_SECURITY_1, pop, service_name);
-  #endif
-  //------------------------------------------------------------------------------
-  STATE_RELAY_1 = EEPROM.read(0);
-  STATE_RELAY_2 = EEPROM.read(1);
-  STATE_RELAY_3 = EEPROM.read(2);
-  STATE_RELAY_4 = EEPROM.read(3);
-  
-  digitalWrite(RELAY_1, STATE_RELAY_1);
-  digitalWrite(RELAY_2, STATE_RELAY_2);
-  digitalWrite(RELAY_3, STATE_RELAY_3);
-  digitalWrite(RELAY_4, STATE_RELAY_4);
-  
-  my_switch1.updateAndReportParam(ESP_RMAKER_DEF_POWER_NAME, STATE_RELAY_1);
-  my_switch2.updateAndReportParam(ESP_RMAKER_DEF_POWER_NAME, STATE_RELAY_2);
-  my_switch3.updateAndReportParam(ESP_RMAKER_DEF_POWER_NAME, STATE_RELAY_3);
-  my_switch4.updateAndReportParam(ESP_RMAKER_DEF_POWER_NAME, STATE_RELAY_4);
-
-  Serial.printf("Relay1 is %s \n", STATE_RELAY_1? "ON" : "OFF");
-  Serial.printf("Relay2 is %s \n", STATE_RELAY_2? "ON" : "OFF");
-  Serial.printf("Relay3 is %s \n", STATE_RELAY_3? "ON" : "OFF");
-  Serial.printf("Relay4 is %s \n", STATE_RELAY_4? "ON" : "OFF");
-  //------------------------------------------------------------------------------
-}
-
-/**********************************
- * loop Function
-***********************************/
-void loop()
-{
-  //------------------------------------------------------------------------------
-  // Read GPIO0 (external button to reset device
-  if(digitalRead(gpio_reset) == LOW) { //Push button pressed
-    Serial.printf("Reset Button Pressed!\n");
-    // Key debounce handling
-    delay(100);
-    int startTime = millis();
-    while(digitalRead(gpio_reset) == LOW) delay(50);
-    int endTime = millis();
-    //_________________________
-    if ((endTime - startTime) > 10000) {
-      // If key pressed for more than 10secs, reset all
-      Serial.printf("Reset to factory.\n");
-      RMakerFactoryReset(2);
-    } 
-    //_________________________
-    else if ((endTime - startTime) > 3000) {
-      Serial.printf("Reset Wi-Fi.\n");
-      // If key pressed for more than 3secs, but less than 10, reset Wi-Fi
-      RMakerWiFiReset(2);
-    }
-    //_________________________
-  }
-  //------------------------------------------------------------------------------
-  delay(100);
-  
-  if (WiFi.status() != WL_CONNECTED){
-    //Serial.println("WiFi Not Connected");
+    // Inicializar relés em estado desligado
+    digitalWrite(RELAY_1, LOW);
+    digitalWrite(RELAY_2, LOW);
+    digitalWrite(RELAY_3, LOW);
+    digitalWrite(RELAY_4, LOW);
     digitalWrite(WIFI_LED, LOW);
-  }
-  else{
-    //Serial.println("WiFi Connected");
-    digitalWrite(WIFI_LED, HIGH);
-  }
-  //------------------------------------------------------------------------------
-  //button_control();
-  //remote_control();
+
+    // Iniciar sensor DHT
+    dht.begin();
+
+    // Configurar dispositivos ESP RainMaker
+    Node myNode = RMaker.initNode("ESP32 Node");
+    Switch relay1("Relay1", &RELAY_1);
+    Switch relay2("Relay2", &RELAY_2);
+    Switch relay3("Relay3", &RELAY_3);
+    Switch relay4("Relay4", &RELAY_4);
+
+    relay1.addCb(writeCallback);
+    relay2.addCb(writeCallback);
+    relay3.addCb(writeCallback);
+    relay4.addCb(writeCallback);
+
+    myNode.addDevice(relay1);
+    myNode.addDevice(relay2);
+    myNode.addDevice(relay3);
+    myNode.addDevice(relay4);
+
+    // Habilitar OTA e serviços adicionais
+    RMaker.enableOTA(OTA_USING_PARAMS);
+    RMaker.enableTZService();
+    RMaker.enableSchedule();
+
+    // Iniciar ESP RainMaker
+    RMaker.start();
+
+    // Configurar provisão Wi-Fi
+    WiFi.onEvent(sysProvEvent);
+#if CONFIG_IDF_TARGET_ESP32
+    WiFiProv.beginProvision(NETWORK_PROV_SCHEME_BLE, NETWORK_PROV_SCHEME_HANDLER_FREE_BTDM, NETWORK_PROV_SECURITY_1, POP, SERVICE_NAME);
+#else
+    WiFiProv.beginProvision(NETWORK_PROV_SCHEME_SOFTAP, NETWORK_PROV_SCHEME_HANDLER_NONE, NETWORK_PROV_SECURITY_1, POP, SERVICE_NAME);
+#endif
 }
 
-/***************************
- * button_control function:
- **************************/
-/*void button_control(){
-    button1.loop();
-    if(button1.isPressed()){
-      control_relay(1, RELAY_1, STATE_RELAY_1);
-      my_switch1.updateAndReportParam(ESP_RMAKER_DEF_POWER_NAME, STATE_RELAY_1);
-    }
-   
-}*/
+void loop() {
+    // Atualizar estado do LED Wi-Fi
+    digitalWrite(WIFI_LED, WiFi.status() == WL_CONNECTED ? HIGH : LOW);
 
-/**********************************
- * control_relay Function
-***********************************/
-void control_relay(int relay_no, int relay_pin, boolean &status){
-  status = !status;
-  digitalWrite(relay_pin, status);
-  EEPROM.write(relay_no-1, status);
-  EEPROM.commit();
-  String text = (status)? "ON" : "OFF";
-  Serial.println("Relay"+String(relay_no)+" is "+text);
+    // Leitura do sensor LDR
+    int ldrValue = analogRead(LDR_PIN);
+    Serial.printf("LDR Value: %d\n", ldrValue);
+
+    // Leitura do sensor de gás
+    int gasDigital = digitalRead(GAS_DIGITAL_PIN);
+    int gasAnalog = analogRead(GAS_ANALOG_PIN);
+    Serial.printf("Gas (Digital): %d, Gas (Analog): %d\n", gasDigital, gasAnalog);
+
+    // Leitura do sensor de umidade e temperatura
+    float humidity = dht.readHumidity();
+    float temperature = dht.readTemperature();
+    if (isnan(humidity) || isnan(temperature)) {
+        Serial.println("Falha ao ler o sensor DHT!");
+    } else {
+        Serial.printf("Umidade: %.2f%%, Temperatura: %.2f°C\n", humidity, temperature);
+    }
+
+    delay(2000);
 }
